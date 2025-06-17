@@ -8,19 +8,19 @@ This repository defines a set of custom Moodle web service functions to automate
 # 🚀 Available Functions
 
 ## 📁 Course Section & Module Management
-Function	Description
-local_course_add_new_section	Add a new section to a course
-local_course_move_module_to_specific_position	Move a module to a specific position within a course
+### Function	Description
+local_course_add_new_section	                              Add a new section to a course
+local_course_move_module_to_specific_position	              Move a module to a specific position within a course
 
 ## 🔗 URL & Resources
-Function	Description
-local_course_add_new_course_module_url	Add a URL resource
-local_course_add_new_course_module_resource	Add a file resource
-local_course_update_course_module_resource	Update a file resource
+### Function	Description
+local_course_add_new_course_module_url	                    Add a URL resource
+local_course_add_new_course_module_resource	                Add a file resource
+local_course_update_course_module_resource	                Update a file resource
 
 ## 📄 Pages, Labels, and Content
-Function	Description
-local_course_add_new_course_module_page	Add a Page module
+### Function	Description
+local_course_add_new_course_module_page	                      Add a Page module
 local_course_update_course_module_page	Update a Page module
 local_course_add_new_course_module_label	Add a Label (Text & Media)
 local_course_update_course_module_label	Update a Label module
