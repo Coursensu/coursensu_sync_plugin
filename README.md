@@ -32,44 +32,61 @@ local_course_add_new_course_module_label	Add a Label (Text & Media)
 local_course_update_course_module_label	Update a Label module
 
 ## 📂 Folder Management
-Function	Description
+### Function	Description
 local_course_add_new_course_module_directory	Add a Folder module
+
 local_course_add_files_to_directory	Upload files into a folder
 
 ## 📚 Book Module
-Function	Description
+### Function	Description
 local_course_add_new_course_module_book	Add a Book module
+
 local_course_import_html_in_book	Import HTML chapters into a Book
+
 local_course_delete_all_chapters_from_book	Delete all chapters in a Book
 
 ## 💬 Forums, Assignments, Quizzes
-Function	Description
+### Function	Description
 local_course_add_new_course_module_forum	Add a Forum
+
 local_course_add_new_course_module_assignment	Add an Assignment
+
 local_course_add_new_course_module_quiz	Add a Quiz
+
 local_course_update_course_module_assignment	Update an Assignment
 
 ## 📘 Lessons
-Function	Description
+### Function	Description
 local_course_update_course_module_lesson	Update a Lesson
+
 local_course_update_course_module_lesson_contentpage	Update content page inside a Lesson
 
 ## 📎 Attachment Uploads
-Function	Description
+### Function	Description
 local_course_save_attachment_in_assignment	Upload attachment to an Assignment
+
 local_course_save_attachment_in_label	Upload attachment to a Label
+
 local_course_save_attachment_in_page	Upload attachment to a Page
+
 local_course_save_attachment_in_lesson	Upload attachment to a Lesson
+
 local_course_save_attachment_in_lessonpage	Upload attachment to a Lesson page
 
 ## 🔗 Core Moodle Functions Included
-Function	Description
+### Function	Description
 core_course_get_courses	List all courses
+
 core_course_get_contents	Get full course structure and content
+
 core_course_get_course_module	Retrieve details about a single module
+
 core_enrol_get_users_courses	Get all courses a user is enrolled in
+
 core_webservice_get_site_info	Get general site info (user, version, etc.)
+
 core_course_delete_modules	Delete course modules
+
 core_course_get_user_administration_options	Retrieve admin options per user/course
 
 # 🛡️ Requirements
@@ -91,6 +108,7 @@ mod/page:addinstance
 mod/assign:addinstance
 
 moodle/course:movesections
+
 ...and others, depending on the module being used.
 
 # 📦 Enabling the Service
@@ -106,4 +124,5 @@ Generate a token for your user via Site Admin > Web services > Manage tokens
 
 # 💬 Contact
 Maintained by Coursensu
+
 Forked and extended from Daniel Schröter
