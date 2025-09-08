@@ -14,11 +14,21 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
+/**
+ * This class defines the functions and konfigurations of the external service.
+ *
+ * @package local_sync_service
+ * @copyright 2022 Daniel Schröter & 2025 Coursensu (extending local_sync_serivce)
+ * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+
 use core_completion\progress;
 require_once(__DIR__ . '/../../config.php');
 require_once($CFG->libdir . '/externallib.php');
 require_once($CFG->dirroot . '/user/lib.php');
 require_once($CFG->dirroot . '/course/lib.php');
+require_once($CFG->dirroot . '/lib/externallib.php');
+
 
 
 defined('MOODLE_INTERNAL') || die();
@@ -126,6 +136,317 @@ class local_sync_service_external extends external_api {
                 'time' => new external_value( PARAM_TEXT, 'defines the mod. visibility', VALUE_DEFAULT, null ),
                 'visible' => new external_value( PARAM_TEXT, 'defines the mod. visibility' ),
                 'beforemod' => new external_value( PARAM_TEXT, 'mod to set before', VALUE_DEFAULT, null ),
+            )
+        );
+    }
+
+        // Functionset for get_sections() *********************************************************************************************.
+
+    /**
+     * Parameter description for get_sections().
+     *
+     * @return external_function_parameters.
+     */
+    public static function get_sections_parameters() {
+        return new external_function_parameters(
+            array(
+                'courseid' => new external_value(PARAM_INT, 'id of course'),
+                'sectionnumbers' => new external_multiple_structure(
+                        new external_value(PARAM_INT, 'sectionnumber (position of section)')
+                            , 'List of sectionnumbers. Wrong numbers will be ignored.
+                                If list of sectionnumbers and list of sectionids are empty
+                                then return infos of all sections of the given course.',
+                                        VALUE_DEFAULT, array()),
+                'sectionids' => new external_multiple_structure(
+                        new external_value(PARAM_INT, 'id of section')
+                            , 'List of sectionids. Wrong ids will be ignored.
+                                If list of sectionnumbers and list of sectionids are empty
+                                then return infos of all sections of the given course.',
+                                        VALUE_DEFAULT, array())
+            )
+        );
+    }
+
+    /**
+     * Get sectioninfos.
+     *
+     * This function returns sectioninfos.
+     *
+     * @param int $courseid Courseid of the belonging course.
+     * @param array $sectionnumbers Array of sectionnumbers (int, optional).
+     * @param array $sectionids Array of section ids (int, optional).
+     * @return array Array with array for each section.
+     */
+    public static function get_sections($courseid, $sectionnumbers = [], $sectionids = []) {
+        global $CFG, $DB;
+        require_once($CFG->dirroot . '/course/lib.php');
+        require_once($CFG->dirroot . '/course/format/lib.php');
+
+        // Validate parameters passed from web service.
+        $params = self::validate_parameters(self::get_sections_parameters(), array(
+            'courseid' => $courseid,
+            'sectionnumbers' => $sectionnumbers,
+            'sectionids' => $sectionids));
+
+        if (! ($course = $DB->get_record('course', array('id' => $params['courseid'])))) {
+            throw new moodle_exception('invalidcourseid', 'local_wsmanagesections', '', $courseid);
+        }
+
+        require_login($course);
+        require_capability('moodle/course:view', context_course::instance($courseid));
+
+        $courseformat = course_get_format($course);
+        // Test if courseformat allows sections.
+        if (!$courseformat->uses_sections()) {
+            throw new moodle_exception('courseformatwithoutsections', 'local_wsmanagesections', '', $courseformat);
+        }
+
+        $lastsectionnumber = $courseformat->get_last_section_number();
+        $coursesections = get_fast_modinfo($course)->get_section_info_all();
+
+        // Collect mentioned sectionnumbers in $secnums.
+        $secnums = array();
+        // Test if $sectionnumbers are part of $coursesections and collect secnums. Inapt numbers will be ignored.
+        if (!empty($sectionnumbers)) {
+            foreach ($sectionnumbers as $num) {
+                if ($num >= 0 and $num <= $lastsectionnumber) {
+                    $secnums[] = $num;
+                }
+            }
+        }
+        // Test if $sectionids are part of $coursesections and collect secnums. Inapt ids will be ignored.
+        if (!empty($sectionids)) {
+            foreach ($coursesections as $section) {
+                $coursesecids[] = $section->id;
+            }
+            foreach ($sectionids as $id) {
+                if ($pos = array_search($id, $coursesecids)) {
+                    $secnums[] = $pos;
+                }
+            }
+        }
+        // Collect all sectionnumbers, if paramters are empty.
+        if (empty($sectionnumbers) and empty($sectionids)) {
+            $secnums = range(0, $lastsectionnumber);
+        }
+        $secnums = array_unique($secnums, SORT_NUMERIC);
+        sort($secnums, SORT_NUMERIC);
+
+        // Arrange the requested informations.
+        $sectionsinfo = array();
+        foreach ($coursesections as $section) {
+            if (in_array($section->section, $secnums)) {
+                // Collect sectionformatoptions.
+                $sectionformatoptions = $courseformat->get_format_options($section);
+                $formatoptionslist = array();
+                foreach ($sectionformatoptions as $key => $value) {
+                    $formatoptionslist[] = array(
+                        'name' => $key,
+                        'value' => $value);
+                }
+                // Write sectioninfo to returned array.
+                $sectionsinfo[] = array(
+                    'sectionnum' => $section->section,
+                    'id' => $section->id,
+                    'name' => format_string(get_section_name($course, $section)),
+                    'summary' => $section->summary,
+                    'summaryformat' => $section->summaryformat,
+                    'visible' => $section->visible,
+                    'uservisible' => $section->uservisible,
+                    'availability' => $section->availability,
+                    'highlight' => $course->marker == $section->section ? 1 : 0,
+                    'sequence' => $section->sequence,
+                    'courseformat' => $course->format,
+                    'sectionformatoptions' => $formatoptionslist,
+                );
+
+            }
+        }
+
+        return $sectionsinfo;
+    }
+
+    /**
+     * Parameter description for get_sections().
+     *
+     * @return external_description
+     */
+    public static function get_sections_returns() {
+        return new external_multiple_structure(
+                new external_single_structure(
+                        array(
+                            'sectionnum'  => new external_value(PARAM_INT, 'sectionnumber (position of section)'),
+                            'id' => new external_value(PARAM_INT, 'section id'),
+                            'name' => new external_value(PARAM_TEXT, 'section name'),
+                            'summary' => new external_value(PARAM_RAW, 'Section description'),
+                            'summaryformat' => new external_format_value('summary'),
+                            'visible' => new external_value(PARAM_INT, 'is the section visible', VALUE_OPTIONAL),
+                            'uservisible' => new external_value(PARAM_BOOL,
+                                    'Is the section visible for the user?', VALUE_OPTIONAL),
+                            'availability' => new external_value(PARAM_RAW, 'Availability information.', VALUE_OPTIONAL),
+                            'highlighted' => new external_value(PARAM_BOOL,
+                                    'Is the section marked as highlighted?', VALUE_OPTIONAL),
+                            'sequence' => new external_value(PARAM_TEXT, 'sequence of module ids in the section'),
+                            'courseformat' => new external_value(PARAM_PLUGIN,
+                                    'course format: weeks, topics, social, site,..'),
+                            'sectionformatoptions' => new external_multiple_structure(
+                                new external_single_structure(
+                                    array('name' => new external_value(PARAM_ALPHANUMEXT, 'section format option name'),
+                                        'value' => new external_value(PARAM_RAW, 'section format option value')
+                                )), 'additional section format options for particular course format', VALUE_OPTIONAL
+                            )
+                        )
+                )
+        );
+    }
+
+    // Functionset for update_sections() ******************************************************************************************.
+
+    /**
+     * Parameter description for update_sections().
+     *
+     * @return external_function_parameters.
+     */
+    public static function update_sections_parameters() {
+        return new external_function_parameters(
+            array(
+                'courseid' => new external_value(PARAM_INT, 'id of course'),
+                'sections' => new external_multiple_structure(
+                    new external_single_structure(
+                        array(
+                            'type' => new external_value(PARAM_TEXT,
+                                'num/id: identify section by sectionnumber or id. Default to num', VALUE_DEFAULT, 'num'),
+                            'section' => new external_value(PARAM_INT, 'depending on type: sectionnumber or sectionid'),
+                            'name' => new external_value(PARAM_TEXT, 'new name of the section', VALUE_OPTIONAL),
+                            'summary' => new external_value(PARAM_RAW, 'summary', VALUE_OPTIONAL),
+                            'summaryformat' => new external_format_value('summary', VALUE_OPTIONAL),
+                            'visible' => new external_value(PARAM_INT, '1: available to student, 0: not available', VALUE_OPTIONAL),
+                            'highlight' => new external_value(PARAM_INT, '1: highlight, 0: remove highlight', VALUE_OPTIONAL),
+                            'sectionformatoptions' => new external_multiple_structure(
+                                new external_single_structure(
+                                    array(
+                                        'name' => new external_value(PARAM_TEXT, 'section format option name'),
+                                        'value' => new external_value(PARAM_RAW, 'section format option value')
+                                    )
+                                ), 'additional options for particular course format', VALUE_OPTIONAL),
+                        )
+                ), 'sections to update', VALUE_DEFAULT, array()),
+            )
+        );
+    }
+
+    /**
+     * Update sections.
+     *
+     * This function updates settings of sections.
+     *
+     * @param int $courseid Courseid of the belonging course.
+     * @param array $sections Array of array with settings for each section to be updated.
+     * @return array Array with warnings.
+     */
+    public static function update_sections($courseid, $sections) {
+        global $CFG, $DB;
+        require_once($CFG->dirroot . '/course/lib.php');
+        require_once($CFG->dirroot . '/course/format/lib.php');
+
+        // Validate parameters passed from web service.
+        $params = self::validate_parameters(self::update_sections_parameters(), array(
+            'courseid' => $courseid,
+            'sections' => $sections));
+
+        if (! ($course = $DB->get_record('course', array('id' => $params['courseid'])))) {
+            throw new moodle_exception('invalidcourseid', 'local_wsmanagesections', '', $courseid);
+        }
+
+        require_login($course);
+        require_capability('moodle/course:update', context_course::instance($courseid));
+
+        $courseformat = course_get_format($course);
+        // Test if courseformat allows sections.
+        if (!$courseformat->uses_sections()) {
+            throw new moodle_exception('courseformatwithoutsections', 'local_wsmanagesections', '', $courseformat);
+        }
+
+        $coursesections = get_fast_modinfo($course)->get_section_info_all();
+        $warnings = array();
+
+        foreach ($sections as $sectiondata) {
+            // Catch any exception while updating course and return as warning to user.
+            try {
+                // Get the section that belongs to $secname['sectionnumber'].
+                $found = 0;
+                foreach ($coursesections as $key => $cs) {
+                    if ($sectiondata['type'] == 'id' and $sectiondata['section'] == $cs->id) {
+                        $found = 1;
+                    } else if ($sectiondata['section'] == $key) {
+                        $found = 1;
+                    }
+                    if ($found == 1) {
+                        $section = $cs;
+                        break;
+                    }
+                }
+                // Section with the desired number/id not found.
+                if ($found == 0) {
+                    throw new moodle_exception('sectionnotfound', 'local_wsmanagesections', '', $sectiondata['section']);
+                }
+
+                // Sectiondata has mostly the right struture to insert it in course_update_section.
+                // Just unset some keys "type", "section", "highlight" and "sectionformatoptions".
+                $data = $sectiondata;
+                foreach (['type', 'section', 'highlight', 'sectionformatoptions'] as $unset) {
+                    unset($data[$unset]);
+                }
+
+                 // Set or unset marker if neccessary.
+                if (isset($sectiondata['highlight'])) {
+                    require_capability('moodle/course:setcurrentsection', context_course::instance($courseid));
+                    if ($sectiondata['highlight'] == 1  and $course->marker != strval($section->section)) {
+                        course_set_marker($courseid, strval($section->section));
+                    } else if ($sectiondata['highlight'] == 0 and $course->marker == $section->section) {
+                        course_set_marker($courseid, "0");
+                    }
+                }
+
+                // Add sectionformatoptions with data['name'] = 'value'.
+                if (!empty($sectiondata['sectionformatoptions'])) {
+                    foreach ($sectiondata['sectionformatoptions'] as $option) {
+                        if (isset($option['name']) && isset($option['value'])) {
+                            $data[$option['name']] = $option['value'];
+                        }
+                    }
+                }
+
+                // Update remaining sectionsettings.
+                course_update_section($section->course, $section, $data);
+            } catch (Exception $e) {
+                $warning = array();
+                $warning['sectionnumber'] = $sectionnumber;
+                $warning['sectionid'] = $section->id;
+                if ($e instanceof moodle_exception) {
+                    $warning['warningcode'] = $e->errorcode;
+                } else {
+                    $warning['warningcode'] = $e->getCode();
+                }
+                $warning['message'] = $e->getMessage();
+                $warnings[] = $warning;
+            }
+        }
+
+        $result = array();
+        $result['warnings'] = $warnings;
+        return $result;
+    }
+
+    /**
+     * Parameter description for update_sections().
+     *
+     * @return external_description
+     */
+    public static function update_sections_returns() {
+        return new external_single_structure(
+            array(
+                'warnings' => new external_warnings()
             )
         );
     }
@@ -848,7 +1169,6 @@ public static function local_sync_service_add_new_course_module_label(
 ) {
     global $DB, $CFG;
 
-    error_log("LABEL_DEBUG: Entered add_new_course_module_label function.");
     if (!empty($CFG->debugdeveloper)) { mtrace("LABEL_MTRACE: Entered add_new_course_module_label."); }
 
     require_once($CFG->dirroot . '/mod/label/lib.php'); // Changed to label/lib.php
@@ -868,7 +1188,6 @@ public static function local_sync_service_add_new_course_module_label(
         )
     );
 
-        error_log("LABEL_DEBUG: Parameters after validation: " . var_export($params, true));
 
 
     // Ensure the current user has required permission in this course.
@@ -891,10 +1210,8 @@ public static function local_sync_service_add_new_course_module_label(
     $actual_section_db_id = $DB->get_field('course_sections', 'id', array('course' => $params['courseid'], 'section' => $target_section_number));
 
     if ($actual_section_db_id === false) {
-        error_log("LABEL_DEBUG: Target section $target_section_number for course {$params['courseid']} does NOT exist. Passing section NUMBER to add_course_module to create it.");
         $cm->section = $target_section_number; // Let add_course_module create it and get the ID
     } else {
-        error_log("LABEL_DEBUG: Target section $target_section_number for course {$params['courseid']} exists with DB ID $actual_section_db_id. Setting cm->section to this ID for add_course_module.");
         $cm->section = $actual_section_db_id; // Pass actual ID
     }
 
@@ -911,15 +1228,12 @@ public static function local_sync_service_add_new_course_module_label(
             $cm->availability = json_encode($availabilityinfo);
         }
     }
-        error_log("LABEL_DEBUG: CM object FINAL BEFORE add_course_module: " . var_export($cm, true));
 
 
     $cmid = add_course_module($cm);
 
-    error_log("LABEL_DEBUG: AFTER add_course_module, returned cmid = " . var_export($cmid, true));
 
     $cm_db_record_after_add = $cmid ? $DB->get_record('course_modules', array('id' => $cmid)) : null;
-    error_log("LABEL_DEBUG: DB mdl_course_modules for $cmid AFTER add_course_module: " . var_export($cm_db_record_after_add, true));
 
     if (!$cmid) {
         // If add_course_module fails, we might want to delete the label instance that was created.
@@ -949,12 +1263,10 @@ public static function local_sync_service_add_new_course_module_label(
     $instance->coursemodule = $cmid;
     $instance->idnumber = $cm->idnumber; // Carry over idnumber (even if empty)
 
-    error_log("LABEL_DEBUG: Instance object BEFORE label_add_instance: " . var_export($instance, true));
 
     // --- Step 3: Call label_add_instance ---
     $instanceid = label_add_instance($instance, null); // $mform is null
 
-        error_log("LABEL_DEBUG: AFTER label_add_instance, instanceid (label.id) = " . var_export($instanceid, true));
 
 
     if (!$instanceid) {
@@ -964,10 +1276,8 @@ public static function local_sync_service_add_new_course_module_label(
 
 // --- EXPLICIT UPDATE OVERRIDE for course_modules.instance ---
     $current_cm_instance_val = $DB->get_field('course_modules', 'instance', array('id' => $cmid));
-    error_log("LABEL_DEBUG: DB CHECK BEFORE EXPLICIT INSTANCE UPDATE: course_modules.instance for cmid $cmid = " . var_export($current_cm_instance_val, true));
 
     if (($current_cm_instance_val == 0 || is_null($current_cm_instance_val)) && $instanceid > 0) {
-        error_log("LABEL_DEBUG: course_modules.instance is 0/NULL for cmid $cmid. Attempting EXPLICIT update to instance $instanceid.");
         if ($DB->set_field('course_modules', 'instance', $instanceid, array('id' => $cmid))) {
             error_log("LABEL_DEBUG: EXPLICIT update of course_modules.instance for cmid $cmid to $instanceid SUCCEEDED.");
         } else {
@@ -985,7 +1295,7 @@ public static function local_sync_service_add_new_course_module_label(
     error_log("LABEL_DEBUG: DB CHECK FINAL for instance: course_modules.instance for cmid $cmid = " . var_export($final_cm_instance_value, true));
     
 
-// --- MANUAL SEQUENCE UPDATE (WORKAROUND) ---
+// --- MANUAL SEQUENCE UPDATE ---
     $final_section_db_id_for_sequence = $DB->get_field('course_modules', 'section', array('id' => $cmid));
     if ($final_section_db_id_for_sequence !== false) {
         $section_obj = $DB->get_record('course_sections', array('id' => $final_section_db_id_for_sequence, 'course' => $params['courseid']));
@@ -1089,14 +1399,6 @@ public static function local_sync_service_add_new_course_module_forum(
 ) {
     global $DB, $CFG;
 
-    // TEST LOGGING
-    error_log("SYNC_SERVICE_DEBUG: Entered add_new_course_module_forum at " . time());
-    if (!empty($CFG->debugdeveloper)) { // Use $CFG->debugdeveloper
-        mtrace("SYNC_SERVICE_MTRACE: Entered add_new_course_module_forum with Moodle Debugging ON.");
-    } else {
-        error_log("SYNC_SERVICE_DEBUG: Moodle Developer Debugging is OFF (\$CFG->debugdeveloper is not set/empty).");
-    }
-    // END TEST LOGGING
 
     require_once($CFG->dirroot . '/mod/forum/lib.php');
     require_once($CFG->dirroot . '/course/lib.php');
@@ -1121,8 +1423,6 @@ public static function local_sync_service_add_new_course_module_forum(
         )
 
     );
-
-        error_log("FORUM_DEBUG: Parameters after validation: " . var_export($params, true));
 
 
     // Context and capability
@@ -1171,7 +1471,6 @@ if ($actual_section_db_id === false) {
     error_log("FORUM_DEBUG: Target section number $target_section_number for course {$params['courseid']} maps to course_sections.id $actual_section_db_id. Setting cm->section to ACTUAL DB ID: $actual_section_db_id before calling add_course_module.");
     $cm->section = $actual_section_db_id; // <<<< SET THE ACTUAL DB ID HERE
 }
-// === END REVISED LOGIC ===
 
 
     $cm->visible = $params['visible'] ? 1 : 0;
@@ -1187,15 +1486,15 @@ if ($actual_section_db_id === false) {
         if ($availabilitytime > 0) { // Only set JSON availability if time is a positive timestamp
             $showc_boolean = (bool)$cm->visible; // Correct: $cm->visible is 0 or 1, so this becomes true or false
             $availabilityinfo = [
-                "op" => "&", // AND operator
-                "c" => [ // Conditions
+                "op" => "&",
+                "c" => [ 
                     [
                         "type" => "date",
-                        "d" => ">=", // "is after or equal to"
+                        "d" => ">=",
                         "t" => $availabilitytime
                     ]
                 ],
-                "showc" => [$showc_boolean] // <<<< CORRECTED: Use the boolean variable here
+                "showc" => [$showc_boolean]
             ];
             $cm->availability = json_encode($availabilityinfo);
         }
@@ -1204,7 +1503,7 @@ if ($actual_section_db_id === false) {
         error_log("FORUM_DEBUG: CM object BEFORE add_course_module: " . var_export($cm, true));
 
 
-    $cmid = add_course_module($cm); // Create CM entry, get $cmid. $cm->instance will be 0.
+    $cmid = add_course_module($cm); 
 
 
 
@@ -1247,63 +1546,23 @@ $instance->assessed = 0; // Default: Forum is not graded (0 = no grading, 1 = po
 $instance->scale = 0;    // Default: Max grade (if points) or scale ID (if using a scale).
                          // If $instance->assessed = 0, this $instance->scale might be what becomes $grade_forum if used directly.
                          // Or, the property Moodle expects might be $instance->grade (common for many modules).
-                         // Let's try setting what seems to be expected from the warning.
 
-// The warning was for $grade_forum. This property isn't standard on the $instance for add_instance.
-// It's more likely that $instance->scale or $instance->grade is used internally and then
-// something calculates or refers to $grade_forum.
-// For now, let's ensure the common grading properties are set.
-// $instance->grade = 0; // Another common property for max grade.
-// `forum_add_instance` might be looking at $instance->scale. If $instance->assessed is 0,
-// it often means "no grade". If $instance->assessed is some positive number, that's the max points.
-// If $instance->assessed is negative, it's a scale ID.
-// The property `grade_forum` from the warning is unusual as a direct property on the instance.
-// It's more likely derived or part of an internal structure.
 
-// Let's look at how mod/forum/mod_form.php defines grading:
-// It uses 'scale' for points (if >0) or scale_id (if <0)
-// and 'assessed' (0 or 1 for simple 'grade' type selection which then maps to scale)
-// To be safe and align with typical Moodle module structure:
 $instance->grade = 0; // Corresponds to max points, 0 if not graded via points.
-                      // `forum_add_instance` will likely use `assessed` and `scale` primarily.
-                      // The `grade_forum` warning might be a red herring if `assessed` and `scale` are set correctly.
-
-// Let's ensure all properties that forum_add_instance might use for grading are present,
-// even if we default them to "not graded".
 $instance->assessed = 0; // 0 = No ratings, >0 = Aggregate type (COUNT, MAX, etc.) for ratings
 $instance->assesstimestart = 0;
 $instance->assesstimeend = 0;
 $instance->scale = 0; // If assesed > 0, this is the scale id (negative) or points (positive)
 
-// The warning `Undefined property: stdClass::$grade_forum` suggests that somewhere in forum's lib,
-// it's directly trying to access `$data->grade_forum`. This is not typical for the initial $data object.
-// This property might be something set *internally* within forum_add_instance or a helper it calls.
-// However, the warning implies it's trying to *read* it from the object *you provide*.
 
-// What if we try to set it based on what it might expect for "whole forum grading" (legacy)?
-// This is a guess:
-// $instance->grade_forum = 0; // If not using whole forum grading.
-// This is less likely, usually these are derived from `assessed` and `scale`.
-
-// Let's try setting what mod_form.php sets:
-// $instance->ratingtime // (boolean for enabling rating period) - probably not needed if not rating
-// $instance->rssarticles
-// $instance->rsstype
-
-// Back to basics for the `$instance` object before `forum_add_instance`:
-// Ensure you have all parameters from your `_parameters` f
-
-$instance->idnumber = ''; // Or copy from $cm->idnumber if you had a specific one
+$instance->idnumber = '';
 
 
-    // CRITICAL CHANGE FOR THIS MOODLE VERSION'S forum_add_instance:
-    $instance->coursemodule = $cmid; // Pass the $cmid
+$instance->coursemodule = $cmid; // Pass the $cmid
 
 
-
-// So, let's try adding these directly to the $instance object passed to forum_add_instance:
 $instance->cmidnumber = ''; // Add this to $instance
-// For grade_forum, it's tricky. What value would it expect?
+
 // If the forum is NOT graded as a whole, it should probably be 0 or not matter.
 // Check forum_add_instance: does it set a default if this is missing? The warning says no.
 $instance->grade_forum = 0; // Add this to $instance, assuming 0 means not graded / default
@@ -1358,12 +1617,12 @@ $instance->grade_forum = 0; // Add this to $instance, assuming 0 means not grade
     $final_cm_instance_value = $DB->get_field('course_modules', 'instance', array('id' => $cmid));
     error_log("FORUM_DEBUG: DB CHECK FINAL: course_modules.instance for cmid $cmid = " . var_export($final_cm_instance_value, true));
 
-// If after all that, it's still not linked, something is seriously wrong.
+// If after all that, it's still not linked, something is wrong.
     if ($final_cm_instance_value != $instanceid || $final_cm_instance_value == 0) {
         // This check is a bit redundant if the explicit update throws an exception on failure,
         // but good for a final sanity check if you make the explicit update non-fatal.
         error_log("FORUM_DEBUG: FINAL CRITICAL CHECK - Forum $instanceid not correctly linked to cmid $cmid. Instance value in DB is $final_cm_instance_value.");
-        // Consider throwing an exception if you haven't already in the explicit update failure block.
+        // Consider exception if not in the update failure block.
     }
 
 
@@ -1379,13 +1638,6 @@ $instance->grade_forum = 0; // Add this to $instance, assuming 0 means not grade
         } 
     }
 
-
-/* temp Swap    // --- MANUAL SEQUENCE UPDATE (WORKAROUND) ---
-    $section_db_id = $DB->get_field('course_modules', 'section', array('id' => $cmid));
-    if ($section_db_id !== false) { // Check if we got a valid section ID from the cm record
-        $section_obj = $DB->get_record('course_sections', array('id' => $section_db_id, 'course' => $params['courseid']));
-        if ($section_obj) {
-        */ 
 
 // new version to fix section id referencing 
     $final_section_db_id_for_sequence = $DB->get_field('course_modules', 'section', array('id' => $cmid));
@@ -1574,7 +1826,7 @@ public static function local_sync_service_add_new_course_module_assignment(
     }
     $cm->visible = $params['visible'] ? 1 : 0;
 
-    if (!is_null($params['time'])) { /* ... availability logic as before ... */
+    if (!is_null($params['time'])) { 
         $availabilitytime = (int)$params['time'];
         if ($availabilitytime < 0) { throw new \invalid_parameter_exception('Invalid time for availability.'); }
         if ($availabilitytime > 0) {
@@ -1587,7 +1839,6 @@ public static function local_sync_service_add_new_course_module_assignment(
     error_log("ASSIGN_DEBUG: CM object FINAL BEFORE add_course_module: " . var_export($cm, true));
     $cmid = add_course_module($cm);
     error_log("ASSIGN_DEBUG: AFTER add_course_module, returned cmid = " . var_export($cmid, true));
-    // ... (log $cm_db_record_after_add as before) ...
 
     if (!$cmid) { throw new \moodle_exception('erroraddcoursemodule', 'webservice'); }
 
@@ -1613,7 +1864,7 @@ public static function local_sync_service_add_new_course_module_assignment(
     // Grading settings
     $instance->grade = (int)$params['grade']; // Max points
     // assign_add_instance sets many grading defaults (e.g., gradepoint, gradingmethod 'simpledirect', etc.)
-    // Add more here if you want to control them via API:
+    // Add more here if we want to control  via API:
     // $instance->gradingmethod = 'simpledirect';
     // $instance->blindmarking = 0;
     // $instance->attemptreopenmethod = ASSIGN_ATTEMPT_REOPEN_METHOD_NONE; (constant from assign/lib.php)
@@ -1621,7 +1872,7 @@ public static function local_sync_service_add_new_course_module_assignment(
 
     // Defaults for properties that might cause warnings if missing (like in Forum)
     $instance->idnumber = $cm->idnumber; // Carry over
-    $instance->coursemodule = $cmid;    // CRITICAL for your Moodle version
+    $instance->coursemodule = $cmid;    // CRITICAL for Moodle version
     $instance->completionexpected = 0;  // Default
 
     // ADDED TO FIX "submissiondrafts cannot be null"
@@ -1904,19 +2155,6 @@ public static function local_sync_service_add_new_course_module_quiz(
     // FIX FOR "password cannot be null"
     $instance->quizpassword = ''; // Default to no password (empty string)
 
-    // Review options (bitmask values)
-    // These often default to very restrictive settings (show nothing).
-    // The value 65536 seen in your INSERT for reviewattempt is QUIZ_REVIEW_IMMEDIATELY | QUIZ_REVIEW_ATTEMPT
-    // (assuming QUIZ_REVIEW_IMMEDIATELY = 65536 and QUIZ_REVIEW_ATTEMPT = 1, but this is not standard,
-    // QUIZ_REVIEW_ATTEMPT is usually 1, QUIZ_REVIEW_IMMEDIATELY is a state, not a bitmask value itself).
-    // Let's use common Moodle defaults for "After the quiz is closed"
-    // These are bitmasks. 0 means nothing shown.
-    // quiz_add_instance will set these based on site defaults if not provided.
-    // To be safe, let's provide some very basic "off" defaults.
-    // Actual values for what is shown are combinations of constants like QUIZ_REVIEW_ATTEMPT, QUIZ_REVIEW_CORRECTNESS etc.
-    // Site defaults are often: Attempt (1), Marks (4), Overall feedback (32) after quiz is closed.
-    // For now, let's set them to 0 and let quiz_add_instance apply its own internal defaults.
-    // The value 65536 is unusual for reviewattempt; it's likely a specific configuration.
     // Defaulting to 0 for all is safest if not explicitly controlled by API params.
     $instance->reviewattempt          = 0; // Example: No review of attempt details
     $instance->reviewcorrectness      = 0; // Example: No review of whether correct
@@ -1925,19 +2163,11 @@ public static function local_sync_service_add_new_course_module_quiz(
     $instance->reviewgeneralfeedback  = 0; // Example: No review of general feedback
     $instance->reviewrightanswer      = 0; // Example: No review of right answer
     $instance->reviewoverallfeedback  = 0; // Example: No review of overall feedback
-    // The value 65536 for reviewattempt in your log is QUIZ_REVIEW_IMMEDIATELY_ATTEMPT from Moodle 2.x era.
-    // For Moodle 3.x/4.x, review options are typically set differently.
-    // quiz_add_instance in later Moodles often defaults these to quiz_get_review_options_after_close_defaults().
-    // Let's rely on quiz_add_instance to set these review options defaults.
-    // The INSERT statement shows it was trying to insert values, so they were likely defaulted by quiz_add_instance
-    // just before the DB call. The password=NULL was the hard stop.
 
-    // These were already in your "robust" setup for Forum/Page
     $instance->idnumber = isset($cm->idnumber) ? $cm->idnumber : ''; // Carry over
-    $instance->coursemodule = $cmid;    // CRITICAL for your Moodle version
+    $instance->coursemodule = $cmid;
     $instance->completionexpected = 0;  // Default
-    // Quiz doesn't have 'assessed' and 'scale' in the same way forum ratings do for its main table.
-    // The main grade is $instance->grade.
+
 
 
     error_log("QUIZ_DEBUG: Instance object BEFORE quiz_add_instance: " . var_export($instance, true));
@@ -1963,7 +2193,7 @@ public static function local_sync_service_add_new_course_module_quiz(
             course_delete_module($cmid); $DB->delete_records('assign', array('id' => $instanceid)); // Delete assign instance
             throw new \moodle_exception('errorupdatelinkcmassign', 'local_sync_service', '', null, "Failed to link assign instance $instanceid to CM $cmid.");
         }
-    } // ... (else log if no update needed or $instanceid was bad) ...
+    } 
     $final_cm_instance_value = $DB->get_field('course_modules', 'instance', array('id' => $cmid));
     error_log("ASSIGN_DEBUG: DB CHECK FINAL for instance: course_modules.instance for cmid $cmid = " . var_export($final_cm_instance_value, true));
 
@@ -2360,88 +2590,192 @@ public static function local_sync_service_add_new_course_module_quiz(
         );
     }
 
-
     /**
-     * Defines the necessary method parameters.
+     * Defines the necessary method parameters for updating a page module.
      * @return external_function_parameters
      */
     public static function local_sync_service_update_course_module_page_parameters() {
         return new external_function_parameters(
             array(
-                'cmid' => new external_value( PARAM_TEXT, 'id of module' ),
-                'content' => new external_value( PARAM_TEXT, 'HTML or Markdown code'  ),
-                'format' => new external_value( PARAM_TEXT, 'Markdown or HTML', VALUE_DEFAULT, \FORMAT_MARKDOWN  ),
+                'cmid' => new external_value(PARAM_INT, 'Course module ID of the page to update.'),
+                'pagename' => new external_value(PARAM_TEXT, 'New display name for the page module.', VALUE_DEFAULT, null), // Optional
+                'pagecontent' => new external_value(PARAM_RAW, 'New HTML content for the page.', VALUE_DEFAULT, null),   // Optional, PARAM_RAW for HTML
+                'intro' => new external_value(PARAM_RAW, 'New introduction for the page module (if used).', VALUE_DEFAULT, null), // Optional
+                'introformat' => new external_value(PARAM_INT, 'Format of the intro (e.g., FORMAT_HTML).', VALUE_DEFAULT, FORMAT_HTML), // Default if intro is set
+
+                // Optional parameters for visibility and module availability
+                'visible' => new external_value(PARAM_BOOL, 'New visibility state for the module.', VALUE_DEFAULT, null),
+                'moduleavailabilitytime' => new external_value(PARAM_INT, 'New overall module availability time (Unix timestamp). Optional to clear if null.', VALUE_DEFAULT, null)
             )
         );
+        // Note: The 'format' for pagecontent is handled internally by page_update_instance if page['format'] is set.
+        // We are not exposing a separate 'pagecontentformat' parameter here, assuming it's FORMAT_HTML if content is given.
+        // If changing the page content format itself, add a 'pagecontentformat' param.
     }
 
     /**
-     * Method to update a new course module containing a file.
+     * Method to update an existing Page course module.
      *
-     * @param $cmid The course module id.
-     * @param $content Content to add
-     * @param $format HTML or Markdown(=default)
-     * @return $update Message: Successful and $cmid of the new Module.
+     * @param int $cmid The course module id.
+     * @param string|null $pagename Optional new name for the page.
+     * @param string|null $pagecontent Optional new HTML content for the page.
+     * @param string|null $intro Optional new intro.
+     * @param int|null $introformat Format for the intro.
+     * @param bool|null $visible Optional new visibility for the course module.
+     * @param int|null $moduleavailabilitytime Optional new availability time for the course module.
+     * @return array Status, message, and cmid.
      */
-    public static function local_sync_service_update_course_module_page($cmid, $content, $format) {
+    public static function local_sync_service_update_course_module_page(
+        // Required first
+        $cmid,
+        // Optionals - ensure PHP defaults match _parameters() VALUE_DEFAULT if they can be omitted by client
+        $pagename = null,
+        $pagecontent = null,
+        $intro = null,
+        $introformat = FORMAT_HTML, // Matches VALUE_DEFAULT for introformat
+        $visible = null,
+        $moduleavailabilitytime = null
+    ) {
         global $DB, $CFG;
-        require_once($CFG->dirroot . '/mod/' . '/page' . '/lib.php');
-        require_once($CFG->dirroot . '/course/' . '/modlib.php');
+        require_once($CFG->dirroot . '/mod/page/lib.php');
+        require_once($CFG->dirroot . '/course/lib.php'); // For course_update_module or rebuild_course_cache
 
-        //debug("local_sync_service_update_course_module_page\n");
-        // Parameter validation.
+        error_log("UPDATE_PAGE_DEBUG: Entered update_course_module_page. cmid: $cmid");
+
+        // Parameter validation
         $params = self::validate_parameters(
             self::local_sync_service_update_course_module_page_parameters(),
-            array(
+            array( // Order of PHP args passed to this array
                 'cmid' => $cmid,
-                'content' => $content,
-                'format' => $format
+                'pagename' => $pagename,
+                'pagecontent' => $pagecontent,
+                'intro' => $intro,
+                'introformat' => $introformat,
+                'visible' => $visible,
+                'moduleavailabilitytime' => $moduleavailabilitytime,
             )
         );
+        error_log("UPDATE_PAGE_DEBUG: Parameters after validation: " . var_export($params, true));
 
-        $cm = get_coursemodule_from_id('page', $cmid, 0, false, MUST_EXIST);
 
-        // Ensure the current user has required permission in this course.
-        $context = context_module::instance($cmid);
-        self::validate_context($context);
-
-        // Required permissions.
-        require_capability('mod/page:addinstance', $context);
-
-        $modulename = 'page';
-        $cm->module = $DB->get_field( 'modules', 'id', array('name' => $modulename) );
-        $instance = new \stdClass();
-        $instance->course = $cm->course;
-        $instance->contentformat = $format;
-        $instance->page =  [
-            'text' => html_entity_decode($content),
-            'format' =>  $format,
-        ];
-
-        $instance->coursemodule = $cmid;
-        $instance->instance = $cm->instance;
-        $instance->modulename = $modulename;
-        $instance->type = 'mod';
-        $instance->visible = true;
-        $instance->id = page_update_instance($instance, null);
-
+        $cm = get_coursemodule_from_id('page', $params['cmid'], 0, false, MUST_EXIST);
         $course = $DB->get_record('course', array('id' => $cm->course), '*', MUST_EXIST);
-        $update = [
-            'message' => 'Successful',
-            'id' => $cmid,
+        $page = $DB->get_record('page', array('id' => $cm->instance), '*', MUST_EXIST); // Get existing page instance
+
+        $context = context_module::instance($cm->id);
+        self::validate_context($context);
+        require_capability('moodle/course:manageactivities', $context); // Or 'mod/page:manage' or similar if it exists
+
+        $page_instance_updated = false;
+        $cm_settings_updated = false;
+
+        // Prepare data for page_update_instance
+        $dataforupdate = clone $page; // Start with existing page data
+        $dataforupdate->id = $page->id; // Essential for update
+        $dataforupdate->instance = $page->id; // Often same as id for _update_instance functions
+        $dataforupdate->coursemodule = $cm->id; // The cmid
+
+        // Update page-specific fields if provided
+        if (!is_null($params['pagename'])) {
+            $dataforupdate->name = $params['pagename'];
+            $page_instance_updated = true;
+        }
+        if (!is_null($params['intro'])) { // Page 'intro' field (description on course page)
+            $dataforupdate->intro = $params['intro'];
+            $dataforupdate->introformat = (int)$params['introformat'];
+            $page_instance_updated = true;
+        }
+
+        // page_update_instance expects content in $data->page['text'] and $data->page['format']
+        // It also needs all other existing 'page' table fields on $dataforupdate
+        // Initialize $dataforupdate->page from existing values if they exist on $page
+        $dataforupdate->page = array(
+            'text'   => $page->content,       // Existing content
+            'format' => $page->contentformat, // Existing format
+            'itemid' => 0                    // Assume no new file draft areas for simplicity in update
+        );
+
+        if (!is_null($params['pagecontent'])) {
+            $dataforupdate->content = $params['pagecontent']; // page_update_instance might also look here
+            $dataforupdate->page['text'] = $params['pagecontent']; // This is what page_update_instance usually uses from $mform
+            // Assuming content is HTML if provided. If we want to allow changing format of pagecontent,
+            // add a 'pagecontentformat' API parameter. For now, if content is updated, we assume HTML.
+            $dataforupdate->contentformat = FORMAT_HTML;
+            $dataforupdate->page['format'] = FORMAT_HTML;
+            $page_instance_updated = true;
+        }
+
+        // Add other properties from $page to $dataforupdate if page_update_instance expects them
+        // and they are not directly updatable via this API function (e.g., display, displayoptions)
+        $dataforupdate->display = $page->display;
+        $dataforupdate->displayoptions = $page->displayoptions;
+        // $dataforupdate->legacyfiles = $page->legacyfiles; // If applicable
+        // $dataforupdate->legacyfileslast = $page->legacyfileslast; // If applicable
+
+        if ($page_instance_updated) {
+            error_log("UPDATE_PAGE_DEBUG: Data for page_update_instance: " . var_export($dataforupdate, true));
+            if (!page_update_instance($dataforupdate, null)) { // Pass null for $mform
+                throw new \moodle_exception('errorupdatepageinstance', 'mod_page', '', null, 'page_update_instance returned false.');
+            }
+            error_log("UPDATE_PAGE_DEBUG: page_update_instance called successfully.");
+        }
+
+        // --- Update Course Module Settings (course_modules table) ---
+        $cm_to_update = new \stdClass(); // Only include fields to change
+        $cm_to_update->id = $cm->id;
+
+        if (!is_null($params['visible'])) {
+            $cm_to_update->visible = $params['visible'] ? 1 : 0;
+            $cm_settings_updated = true;
+        }
+
+        // Handle availability time - allow clearing if null is explicitly sent
+        if (array_key_exists('moduleavailabilitytime', $params)) { // Check if key was sent
+            if (is_null($params['moduleavailabilitytime'])) {
+                $cm_to_update->availability = null; // Clear restriction
+            } else {
+                $availabilitytime = (int)$params['moduleavailabilitytime'];
+                if ($availabilitytime < 0) {
+                    throw new \invalid_parameter_exception('Invalid module availability time.');
+                }
+                if ($availabilitytime > 0) {
+                    $current_visibility = isset($cm_to_update->visible) ? $cm_to_update->visible : $cm->visible;
+                    $showc_boolean = (bool)$current_visibility;
+                    $availabilityinfo = ["op"=>"&","c"=>[["type"=>"date","d"=>">=","t"=>$availabilitytime]],"showc"=>[$showc_boolean]];
+                    $cm_to_update->availability = json_encode($availabilityinfo);
+                } else { // Time is 0, also clear restriction (or handle 0 as specific date if Moodle does)
+                    $cm_to_update->availability = null;
+                }
+            }
+            $cm_settings_updated = true;
+        }
+
+        if ($cm_settings_updated) {
+            error_log("UPDATE_PAGE_DEBUG: Updating course_modules with: " . var_export($cm_to_update, true));
+            $DB->update_record('course_modules', $cm_to_update);
+            // For more complex cm updates (e.g., groupmode, idnumber), consider calling course_update_module($updated_cm_object)
+        }
+
+        rebuild_course_cache($course->id);
+        error_log("UPDATE_PAGE_DEBUG: Page update process completed for cmid: $cmid");
+
+        return [
+            'status' => true,
+            'message' => 'Page module updated successfully.',
+            'id' => (int)$cm->id, // Return the cmid
         ];
-        return $update;
     }
 
     /**
-     * Obtains the Parameter which will be returned.
-     * @return external_description
+     * Describes the return value of the update_course_module_page function.
+     * @return external_single_structure
      */
     public static function local_sync_service_update_course_module_page_returns() {
         return new external_single_structure(
             array(
-                'message' => new external_value( PARAM_TEXT, 'if the execution was successful' ),
-                'id' => new external_value( PARAM_TEXT, 'cmid of the new module' ),
+                'status' => new external_value(PARAM_BOOL, 'True if the update was successful.'),
+                'message' => new external_value(PARAM_TEXT, 'A message indicating success or failure explanation.'),
+                'id' => new external_value(PARAM_INT, 'The course module ID (cmid) of the updated page.'),
             )
         );
     }
