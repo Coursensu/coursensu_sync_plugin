@@ -1,4 +1,4 @@
-## 📦 Moodle Sync Service API
+## 📦 Moodle / Coursensu Sync Service API
 
 This repository defines a set of custom Moodle web service functions to automate the creation, updating, movement, and content population of course modules via REST API.
 
