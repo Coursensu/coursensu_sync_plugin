@@ -21,4 +21,4 @@
  * @copyright 2022 Daniel Schröter & 2025 Coursensu (extending local_sync_service)
  * @license https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-$string['pluginname'] = 'Sync Webservice';
+$string['pluginname'] = 'Coursensu Sync Web Services';
