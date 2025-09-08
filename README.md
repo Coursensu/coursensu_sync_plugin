@@ -11,6 +11,10 @@ This repository defines a set of custom Moodle web service functions to automate
 ### Function	Description
 local_course_add_new_section	                              Add a new section to a course
 
+local_course_get_sections	                                  Get all sections in a course
+
+local_course_update_sections	                              Update a section in a course
+
 local_course_move_module_to_specific_position	              Move a module to a specific position within a course
 
 ## 🔗 URL & Resources
@@ -90,7 +94,7 @@ core_course_delete_modules	Delete course modules
 core_course_get_user_administration_options	Retrieve admin options per user/course
 
 # 🛡️ Requirements
-Moodle 3.11+ (Tested with 4.2)
+Moodle 3.11+ (Tested with 4.2 and 5.0.1)
 
 REST enabled in Site Admin > Plugins > Web Services
 
