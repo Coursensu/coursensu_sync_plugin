@@ -599,9 +599,22 @@ class local_sync_service_external extends external_api {
         $cm->module     = $DB->get_field('modules', 'id', array( 'name' => $modulename ));
         $cm->section    = $params['sectionnum'];
         if (!is_null($params['time'])) {
-            $cm->availability = "{\"op\":\"&\",\"c\":[{\"type\":\"date\",\"d\":\">=\",\"t\":" . $params['time'] . "}],\"showc\":[" . $params['visible'] . "]}";
-        } else if ( $params['visible'] === 'false' ) {
-            $cm->visible = 0;
+            // Build availability JSON with date condition.
+            // "showc" should still reflect visibility, but as a boolean.
+            $avail = [
+                "op" => "&",
+                "c" => [[
+                    "type" => "date",
+                    "d"    => ">=",
+                    "t"    => (int)$params['time']
+                ]],
+                "showc" => [ (bool)$params['visible'] ]
+            ];
+            $cm->availability = json_encode($avail);
+
+        } else {
+            // No date restriction: just use normal visible flag.
+            $cm->visible = (int)$params['visible']; // 1 or 0
         }
         $cm->id = add_course_module($cm);
         $cmid = $cm->id;
@@ -771,9 +784,22 @@ class local_sync_service_external extends external_api {
         $cm->module     = $DB->get_field('modules', 'id', array( 'name' => $modulename ));
         $cm->section    = $params['sectionnum'];
         if (!is_null($params['time'])) {
-            $cm->availability = "{\"op\":\"&\",\"c\":[{\"type\":\"date\",\"d\":\">=\",\"t\":" . $params['time'] . "}],\"showc\":[" . $params['visible'] . "]}";
-        } else if ( $params['visible'] === 'false' ) {
-            $cm->visible = 0;
+            // Build availability JSON with date condition.
+            // "showc" should still reflect visibility, but as a boolean.
+            $avail = [
+                "op" => "&",
+                "c" => [[
+                    "type" => "date",
+                    "d"    => ">=",
+                    "t"    => (int)$params['time']
+                ]],
+                "showc" => [ (bool)$params['visible'] ]
+            ];
+            $cm->availability = json_encode($avail);
+
+        } else {
+            // No date restriction: just use normal visible flag.
+            $cm->visible = (int)$params['visible']; // 1 or 0
         }
         $cm->id = add_course_module($cm);
         $cmid = $cm->id;
@@ -791,7 +817,8 @@ class local_sync_service_external extends external_api {
 
         $update = [
             'message' => 'Successful',
-            'id' => $instance->id,
+            'cmid' => $cmid,
+            'instanceid' => $instance->id,
         ];
         return $update;
     }
@@ -803,8 +830,9 @@ class local_sync_service_external extends external_api {
     public static function local_sync_service_add_new_course_module_directory_returns() {
         return new external_single_structure(
             array(
-                'message' => new external_value( PARAM_TEXT, 'if the execution was successful' ),
-                'id' => new external_value( PARAM_TEXT, 'cmid of the new module' ),
+            'message' => new external_value(PARAM_TEXT, 'if the execution was successful'),
+            'cmid' => new external_value(PARAM_INT, 'course module id of the new folder'),
+            'instanceid' => new external_value(PARAM_INT, 'id of the new folder instance (mdl_folder.id)')
             )
         );
     }
@@ -817,8 +845,8 @@ class local_sync_service_external extends external_api {
         return new external_function_parameters(
             array(
                 'courseid' => new external_value( PARAM_TEXT, 'id of course' ),
+                'cmid' => new external_value( PARAM_TEXT, 'course module id of folder' ),
                 'itemid' => new external_value( PARAM_TEXT, 'id of the upload' ),
-                'contextid' => new external_value( PARAM_TEXT, 'contextid of folder' ),
             )
         );
     }
@@ -831,7 +859,7 @@ class local_sync_service_external extends external_api {
      * @param $contextid Modules contextid.
      * @return $update Message: Successful.
      */
-    public static function local_sync_service_add_files_to_directory($courseid, $itemid, $contextid) {
+    public static function local_sync_service_add_files_to_directory($courseid, $cmid, $itemid) {
         global $CFG;
         require_once($CFG->dirroot . '/mod/' . '/folder' . '/lib.php');
 
@@ -840,19 +868,26 @@ class local_sync_service_external extends external_api {
             self::local_sync_service_add_files_to_directory_parameters(),
             array(
                 'courseid' => $courseid,
+                'cmid' => $cmid,
                 'itemid' => $itemid,
-                'contextid' => $contextid,
             )
         );
 
         // Ensure the current user has required permission in this course.
-        $context = context_course::instance($params['courseid']);
+        $cm      = get_coursemodule_from_id('folder', $params['cmid'], $params['courseid']);
+        $context = context_module::instance($cm->id);
         self::validate_context($context);
 
         // Required permissions.
         require_capability('mod/folder:managefiles', $context);
 
-        file_merge_files_from_draft_area_into_filearea($params['itemid'], $params['contextid'], 'mod_folder', 'content', 0);
+        file_merge_files_from_draft_area_into_filearea(
+            $params['itemid'],
+            $context->id,
+            'mod_folder',
+            'content',
+            0
+        );
 
         $update = [
             'message' => 'Successful',
